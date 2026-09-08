@@ -5,279 +5,227 @@ from flask import Flask, render_template_string, request
 
 app = Flask(__name__)
 
-# Load the trained model
+# Load the SVR model
 MODEL_PATH = "svm.pkl"
-try:
+model = None
+
+if os.path.exists(MODEL_PATH):
     with open(MODEL_PATH, "rb") as f:
         model = pickle.load(f)
-except Exception as e:
-    model = None
-    print(f"Error loading model: {e}")
 
-# HTML & CSS Template
-HTML_TEMPLATE = """
+# Categorical options map matching model feature expectations
+CATEGORICAL_OPTIONS = {
+    "gender": ["Male", "Female", "Other"],
+    "course": ["Computer Science", "Engineering", "Business", "Arts", "Medicine", "Law"],
+    "internet_access": ["Yes", "No"],
+    "sleep_quality": ["Poor", "Average", "Good", "Excellent"],
+    "study_method": ["Self Study", "Group Study", "Online Lectures", "Tutor"],
+    "exam_difficulty": ["Easy", "Medium", "Hard"]
+}
+
+# Simple manual encoding dictionary for ordinal/categorical fields
+ENCODING_MAPS = {
+    "gender": {"Male": 0, "Female": 1, "Other": 2},
+    "course": {"Computer Science": 0, "Engineering": 1, "Business": 2, "Arts": 3, "Medicine": 4, "Law": 5},
+    "internet_access": {"No": 0, "Yes": 1},
+    "sleep_quality": {"Poor": 0, "Average": 1, "Good": 2, "Excellent": 3},
+    "study_method": {"Self Study": 0, "Group Study": 1, "Online Lectures": 2, "Tutor": 3},
+    "exam_difficulty": {"Easy": 0, "Medium": 1, "Hard": 2}
+}
+
+HTML_LAYOUT = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Performance Predictor</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>SVR Model Predictor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        :root {
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-            --card-bg: rgba(255, 255, 255, 0.04);
-            --card-border: rgba(255, 255, 255, 0.08);
-            --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-            --accent-hover: linear-gradient(135deg, #4f46e5 0%, #9333ea 100%);
-            --text-main: #f8fafc;
-            --text-sub: #94a3b8;
-            --input-bg: rgba(15, 23, 42, 0.6);
-            --shadow-glow: 0 0 25px rgba(99, 102, 241, 0.15);
-            --shadow-card: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-        }
-
         body {
-            background: var(--bg-gradient);
-            color: var(--text-main);
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 2rem 1rem;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px 0;
         }
-
-        .container {
-            width: 100%;
-            max-width: 800px;
-            background: var(--card-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--card-border);
-            border-radius: 24px;
-            padding: 2.5rem;
-            box-shadow: var(--shadow-card), var(--shadow-glow);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .container:hover {
-            box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.25);
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .header h1 {
-            font-size: 2.25rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
-        }
-
-        .header p {
-            color: var(--text-sub);
-            font-size: 0.95rem;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 1.25rem;
-        }
-
-        .input-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .input-group label {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: var(--text-sub);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .input-group input, .input-group select {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            background: var(--input-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            color: var(--text-main);
-            font-size: 0.95rem;
-            outline: none;
-            transition: all 0.25s ease;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-
-        .input-group input:focus, .input-group select:focus {
-            border-color: #6366f1;
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), inset 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-
-        .btn-submit {
-            margin-top: 2rem;
-            width: 100%;
-            padding: 1rem;
-            background: var(--accent-gradient);
+        .card-custom {
+            background: #ffffff;
             border: none;
-            border-radius: 12px;
-            color: #ffffff;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4);
-        }
-
-        .btn-submit:hover {
-            background: var(--accent-hover);
-            transform: translateY(-2px);
-            box-shadow: 0 15px 25px -5px rgba(99, 102, 241, 0.5);
-        }
-
-        .result-card {
-            margin-top: 2rem;
-            padding: 1.5rem;
-            background: rgba(99, 102, 241, 0.1);
-            border: 1px solid rgba(99, 102, 241, 0.3);
             border-radius: 16px;
-            text-align: center;
-            animation: fadeIn 0.4s ease-in-out;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-
-        .result-card h2 {
-            font-size: 1.1rem;
-            color: var(--text-sub);
-            margin-bottom: 0.25rem;
+        .card-custom:hover {
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15), 0 6px 12px rgba(0, 0, 0, 0.08);
         }
-
-        .result-card .score {
-            font-size: 2.25rem;
-            font-weight: 700;
-            color: #a855f7;
+        .btn-primary-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(118, 75, 162, 0.3);
+            transition: all 0.3s ease;
         }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+        .btn-primary-custom:hover {
+            opacity: 0.95;
+            box-shadow: 0 6px 16px rgba(118, 75, 162, 0.4);
+            transform: translateY(-1px);
+        }
+        .form-control, .form-select {
+            border-radius: 8px;
+            padding: 10px 14px;
+            border: 1px solid #e2e8f0;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: #764ba2;
+            box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.15);
+        }
+        .result-box {
+            background: #f8fafc;
+            border-left: 4px solid #764ba2;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
         }
     </style>
 </head>
 <body>
+<div class="container my-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-md-10">
+            <div class="card card-custom p-4 p-md-5">
+                <h2 class="text-center mb-4 font-weight-bold" style="color: #2d3748;">Performance Predictor</h2>
+                
+                {% if prediction is not none %}
+                    <div class="result-box mb-4 text-center">
+                        <h4 class="m-0 text-muted">Predicted Score / Value</h4>
+                        <span class="display-5 fw-bold" style="color: #764ba2;">{{ prediction }}</span>
+                    </div>
+                {% endif %}
 
-<div class="container">
-    <div class="header">
-        <h1>Model Prediction Dashboard</h1>
-        <p>Enter student metrics to compute predicted performance output</p>
-    </div>
-
-    <form method="POST" action="/predict">
-        <div class="grid">
-            <div class="input-group">
-                <label>Age</label>
-                <input type="number" name="age" step="any" placeholder="e.g. 20" required>
-            </div>
-            <div class="input-group">
-                <label>Gender</label>
-                <input type="number" name="gender" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Course</label>
-                <input type="number" name="course" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Study Hours</label>
-                <input type="number" name="study_hours" step="any" placeholder="e.g. 5.5" required>
-            </div>
-            <div class="input-group">
-                <label>Class Attendance</label>
-                <input type="number" name="class_attendance" step="any" placeholder="e.g. 85" required>
-            </div>
-            <div class="input-group">
-                <label>Internet Access</label>
-                <input type="number" name="internet_access" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Sleep Hours</label>
-                <input type="number" name="sleep_hours" step="any" placeholder="e.g. 7" required>
-            </div>
-            <div class="input-group">
-                <label>Sleep Quality</label>
-                <input type="number" name="sleep_quality" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Study Method</label>
-                <input type="number" name="study_method" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Facility Rating</label>
-                <input type="number" name="facility_rating" step="any" placeholder="Numeric value" required>
-            </div>
-            <div class="input-group">
-                <label>Exam Difficulty</label>
-                <input type="number" name="exam_difficulty" step="any" placeholder="Numeric value" required>
+                <form action="/predict" method="POST">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Age</label>
+                            <input type="number" step="any" name="age" class="form-control" placeholder="e.g. 20" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Gender</label>
+                            <select name="gender" class="form-select" required>
+                                {% for opt in categorical_options['gender'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Course</label>
+                            <select name="course" class="form-select" required>
+                                {% for opt in categorical_options['course'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Study Hours</label>
+                            <input type="number" step="any" name="study_hours" class="form-control" placeholder="e.g. 5.5" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Class Attendance (%)</label>
+                            <input type="number" step="any" name="class_attendance" class="form-control" placeholder="e.g. 85" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Internet Access</label>
+                            <select name="internet_access" class="form-select" required>
+                                {% for opt in categorical_options['internet_access'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Sleep Hours</label>
+                            <input type="number" step="any" name="sleep_hours" class="form-control" placeholder="e.g. 7" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Sleep Quality</label>
+                            <select name="sleep_quality" class="form-select" required>
+                                {% for opt in categorical_options['sleep_quality'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Study Method</label>
+                            <select name="study_method" class="form-select" required>
+                                {% for opt in categorical_options['study_method'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Facility Rating (1-5)</label>
+                            <input type="number" step="any" name="facility_rating" class="form-control" placeholder="e.g. 4" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Exam Difficulty</label>
+                            <select name="exam_difficulty" class="form-select" required>
+                                {% for opt in categorical_options['exam_difficulty'] %}
+                                    <option value="{{ opt }}">{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom text-white w-100 mt-4">Generate Prediction</button>
+                </form>
             </div>
         </div>
-
-        <button type="submit" class="btn-submit">Generate Prediction</button>
-    </form>
-
-    {% if prediction_text %}
-    <div class="result-card">
-        <h2>Predicted Score / Outcome</h2>
-        <div class="score">{{ prediction_text }}</div>
     </div>
-    {% endif %}
 </div>
-
 </body>
 </html>
 """
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML_LAYOUT, categorical_options=CATEGORICAL_OPTIONS, prediction=None)
 
 @app.route("/predict", methods=["POST"])
 def predict():
     if model is None:
-        return render_template_string(HTML_TEMPLATE, prediction_text="Model file missing or failed to load.")
+        return "Model not loaded.", 500
+
+    form_data = request.form
     
-    try:
-        # Extract features in exact order as required by svm.pkl
-        feature_keys = [
-            'age', 'gender', 'course', 'study_hours', 'class_attendance',
-            'internet_access', 'sleep_hours', 'sleep_quality', 
-            'study_method', 'facility_rating', 'exam_difficulty'
-        ]
-        
-        input_data = [float(request.form.get(key, 0)) for key in feature_keys]
-        features_array = np.array([input_data])
-        
-        # Predict using SVR model
-        prediction = model.predict(features_array)[0]
-        result = f"{prediction:.2f}"
-        
-        return render_template_string(HTML_TEMPLATE, prediction_text=result)
+    # Process and encode feature vector according to model sequence:
+    # ['age', 'gender', 'course', 'study_hours', 'class_attendance', 'internet_access', 
+    #  'sleep_hours', 'sleep_quality', 'study_method', 'facility_rating', 'exam_difficulty']
     
-    except Exception as e:
-        return render_template_string(HTML_TEMPLATE, prediction_text=f"Error: {str(e)}")
+    features = [
+        float(form_data.get("age")),
+        ENCODING_MAPS["gender"].get(form_data.get("gender"), 0),
+        ENCODING_MAPS["course"].get(form_data.get("course"), 0),
+        float(form_data.get("study_hours")),
+        float(form_data.get("class_attendance")),
+        ENCODING_MAPS["internet_access"].get(form_data.get("internet_access"), 0),
+        float(form_data.get("sleep_hours")),
+        ENCODING_MAPS["sleep_quality"].get(form_data.get("sleep_quality"), 0),
+        ENCODING_MAPS["study_method"].get(form_data.get("study_method"), 0),
+        float(form_data.get("facility_rating")),
+        ENCODING_MAPS["exam_difficulty"].get(form_data.get("exam_difficulty"), 0)
+    ]
+
+    prediction = model.predict(np.array([features]))[0]
+    formatted_prediction = round(float(prediction), 2)
+
+    return render_template_string(
+        HTML_LAYOUT, 
+        categorical_options=CATEGORICAL_OPTIONS, 
+        prediction=formatted_prediction
+    )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000, debug=True)
